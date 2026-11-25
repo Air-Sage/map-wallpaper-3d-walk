@@ -95,6 +95,12 @@ button,input{font:inherit;color:inherit}
 .btn{border:1px solid var(--line);background:var(--panel-hi);border-radius:9px;padding:5px 14px;cursor:pointer;white-space:nowrap}
 .btn.sm{padding:3px 10px;font-size:13px}
 .btn:hover{border-color:var(--glow);color:var(--glow)}
+.btn[aria-pressed="true"]{background:var(--glow);border-color:var(--glow);color:#04121a;font-weight:600}
+.stick{position:absolute;left:18px;bottom:18px;width:104px;height:104px;border-radius:50%;border:1px solid var(--line);background:rgba(10,16,32,.5);touch-action:none}
+.mini{position:absolute;right:14px;bottom:34px;width:168px;aspect-ratio:12/7;border:1px solid var(--line);border-radius:8px;background:var(--panel) center/100% 100% no-repeat;pointer-events:none;overflow:hidden;opacity:.94}
+.mini i{position:absolute;width:10px;height:10px;margin:-5px 0 0 -5px;border-radius:50%;background:var(--amber);box-shadow:0 0 0 2px #1c1204}
+@media (max-width:640px){.mini{width:104px;bottom:12px}}
+.stick i{position:absolute;left:50%;top:50%;width:44px;height:44px;margin:-22px 0 0 -22px;border-radius:50%;background:rgba(69,214,232,.6)}
 :is(.btn,.nav,.tile):focus-visible,.tick input:focus-visible,.knob input:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
 
 /* index wall */
@@ -136,23 +142,30 @@ button,input{font:inherit;color:inherit}
 <div class="app">
   <header class="top">
     <h1>地图壁纸 <b>3D</b> 展厅</h1>
-    <p>文件夹里的 100 张 2.5D 场景图。每张先补画出侧面和背面的视角，再逐个视角估算深度、重建成带贴图的 3D 网格，拼成一座能绕着看一整圈的沙盘。</p>
+    <p>文件夹里的 100 张 2.5D 场景图。每张先推理出右侧、背面、左侧三个方位的视图，再把四个方位的深度网格融合成一张统一的地形，用各方位的画面给它上色。操纵小探险者走进去，用第一人称或第三人称自由探索。</p>
   </header>
 
   <section class="stage" id="stage" aria-label="3D 观察窗">
-    <canvas id="gl" tabindex="0" aria-label="当前地图的 3D 沙盘，拖动可环绕"></canvas>
+    <canvas id="gl" tabindex="0" aria-label="当前地图的 3D 场景，可以走进去探索"></canvas>
     <div class="hud hud-id"><span class="num" id="hudNum">001</span><span class="of">/ 100</span></div>
     <div class="hud hud-stat">
       <div id="hudStat">—</div>
       <div class="legend" id="legend" hidden>低<i></i>高</div>
     </div>
-    <div class="hud hud-hint">拖动环绕 · Ctrl + 滚轮或双指缩放 · 双击复位 · ← → 换图</div>
+    <div class="hud hud-hint" id="hint">拖动环绕 · Ctrl + 滚轮或双指缩放 · 双击复位 · ← → 换图</div>
+    <div class="stick" id="stick" hidden aria-label="移动摇杆"><i></i></div>
+    <div class="mini" id="mini" hidden aria-hidden="true"><i></i></div>
     <div class="hud busy" id="busy" hidden>载入中</div>
     <button class="nav prev" id="prev" type="button" aria-label="上一张">‹</button>
     <button class="nav next" id="next" type="button" aria-label="下一张">›</button>
   </section>
 
   <section class="console" aria-label="显示设置">
+    <fieldset class="seg" id="views">
+      <legend>观看方式</legend>
+      <label><input type="radio" name="view" id="view-walk" value="walk" checked><span>走进去</span></label>
+      <label><input type="radio" name="view" id="view-orbit" value="orbit"><span>环绕看</span></label>
+    </fieldset>
     <fieldset class="seg" id="modes">
       <legend>显示模式</legend>
       <label><input type="radio" name="mode" id="mode-tex" value="0" checked><span>贴图</span></label>
@@ -164,9 +177,16 @@ button,input{font:inherit;color:inherit}
       <input type="range" id="depthK" min="40" max="170" step="1" value="100">
       <output id="depthKOut" for="depthK">100%</output>
     </label>
-    <label class="tick" for="auto"><input type="checkbox" id="auto" checked>自动旋转</label>
+    <label class="tick" for="auto" id="autoTick"><input type="checkbox" id="auto" checked>自动旋转</label>
     <label class="tick" for="lit"><input type="checkbox" id="lit">打光</label>
     <div class="snaps" id="snaps" aria-label="转到视角"></div>
+    <div class="snaps" id="cams" aria-label="镜头">
+      <span>镜头</span>
+      <button class="btn sm" type="button" data-cam="over" aria-pressed="true">全景</button>
+      <button class="btn sm" type="button" data-cam="third" aria-pressed="false">跟随</button>
+      <button class="btn sm" type="button" data-cam="first" aria-pressed="false">第一人称</button>
+      <button class="btn sm" type="button" data-cam="spawn">回到起点</button>
+    </div>
     <span class="spacer"></span>
     <button class="btn" id="reset" type="button">复位视角</button>
     <!--LOCAL-BEGIN--><button class="btn" id="glb" type="button" title="把当前地图的全部视角导出成一个 .glb 模型文件">导出 GLB</button><!--LOCAL-END-->
@@ -176,7 +196,7 @@ button,input{font:inherit;color:inherit}
   <div class="index-head"><h2>全部地图</h2><span id="indexInfo"></span></div>
   <div class="grid" id="grid"></div>
 
-  <p class="note"><b>怎么建的模：</b>原图只有一个固定的 2.5D 视角。先请 Codex 按“相机绕场景中心转到右侧、背面、左侧”各重画一张（侧面用竖幅，这样横向的场景从侧面看才是又窄又深），保持地标、布局和画风一致。再用 Depth Anything V2 Small 给每个视角估出远近，把一张网格沿视线推开成浮雕，在深度断开的地方切开并补出被挡住的背景；然后找出每个视角里地面所在的平面，以地面为准把四个视角摆到同一块底板上。转动时显示相机离你最近的那个视角，两个视角之间做过渡。侧面和背面是重新推理出来的，细节不会和原作完全对得上，转到两个视角正中间时也能看出接缝。</p>
+  <p class="note"><b>这个世界是怎么来的：</b>原图只有一个固定的 2.5D 视角。先请 Codex 推理出右侧、背面、左侧三个方位的视图（侧面用竖幅，这样横向的场景从侧面看才是又窄又深），保持地标、布局和画风一致。再用 Depth Anything V2 Small 给每个方位估出远近、建成网格，并以地面为准摆进同一个坐标系。然后从正上方把网格压成一张高度图，得到一块可以站上去的统一地形：形状取自原图，原图看不到的背面和侧面由其余方位的画面投影上色。走动时按高度图做碰撞，陡坡和墙会挡住。<b>局限：</b>地形是单层高度图，桥洞和悬空的东西表达不了；贴图只有原图那么大，第一人称贴近看会糊；画里的角色会被当成地形的一部分。</p>
 </div>
 
 <script>
@@ -202,7 +222,7 @@ const degsOf = id => VIEWS[id] ? Object.keys(VIEWS[id]).map(Number).sort((p, q) 
 
 const stage = $('stage'), canvas = $('gl'), grid = $('grid');
 const st = {
-  cur: 0, map: null, mode: 0, strength: 1, lit: 0, auto: !reduceMotion,
+  cur: 0, map: null, view: 'walk', mode: 0, strength: 1, lit: 0, auto: !reduceMotion,
   yaw: 0, pitch: 0, zoom: 1, tYaw: 0, tPitch: 0, tZoom: 1, autoMix: 0, idleAt: 0,
   dirty: true, t0: performance.now(),
 };
@@ -215,12 +235,12 @@ for (let i = 0; i < N; i++) {
   if (round) full++;
   b.type = 'button'; b.className = 'tile'; b.dataset.i = i;
   b.style.backgroundPosition = `${(i % 10) * 100 / 9}% ${Math.floor(i / 10) * 100 / 9}%`;
-  b.setAttribute('aria-label', '地图 ' + id + (round ? '，可环绕一圈' : '，只有正面视角'));
+  b.setAttribute('aria-label', '地图 ' + id + (round ? '，四个方位的视图齐全' : '，只有正面视图'));
   b.innerHTML = `<span class="n">${id}</span>` + (round ? '<span class="r"></span>' : '');
   grid.appendChild(b);
 }
-$('indexInfo').innerHTML = full >= N ? '001 – 100，全部可以环绕一圈' :
-  `<span class="ring"></span>带圆环的 ${full} 张已补全侧面和背面，可以环绕一圈；其余 ${N - full} 张目前只有正面视角`;
+$('indexInfo').innerHTML = full >= N ? '001 – 100，四个方位的视图都已齐全' :
+  `<span class="ring"></span>带圆环的 ${full} 张已有四个方位的视图，场景的侧面和背面都有内容；其余 ${N - full} 张目前只有正面，走到物体背后会是补出来的平地`;
 grid.addEventListener('click', e => {
   const t = e.target.closest('.tile'); if (!t) return;
   select(+t.dataset.i, true);
@@ -333,6 +353,115 @@ void main(){
   }
   o = vec4(col,1.0);
 }`;
+
+// ---- the walkable world ----
+// 1. every view's mesh seen from straight above: colour into one target, height into another
+const VS_BAKE = VS.replace('uniform vec2 uStep;', 'uniform vec2 uStep, uBox;')
+  .replace('gl_Position = uVP*vec4(vW,1.0);', 'gl_Position = vec4(vW.x/uBox.x, vW.z/uBox.y, 1.0-2.0*clamp((vW.y+0.6)/2.4,0.0,1.0), 1.0);');
+const FS_BAKE = `#version 300 es
+precision highp float;
+in vec2 vUV; in float vFacing; in vec3 vN, vW;
+uniform sampler2D uTex, uBg;
+uniform int uLayer;
+layout(location=0) out vec4 oCol;
+layout(location=1) out vec4 oHgt;
+void main(){
+  vec3 col = texture(uTex,vUV).rgb;
+  if(uLayer==1){ vec4 b = texture(uBg,vUV); col = mix(col, b.rgb, b.a); }
+  oCol = vec4(col, 1.0);
+  oHgt = vec4(vW.y, uLayer==0 ? 1.0 : 0.5, vFacing, 1.0);    // height, who saw it (1 = seen, 0.5 = painted-in), facing
+}`;
+// 2. the fused terrain, coloured by projecting the views back onto it
+const VS_WORLD = `#version 300 es
+precision highp float;
+layout(location=0) in vec3 aP;
+layout(location=1) in vec3 aN;
+uniform mat4 uVP;
+out vec3 vW, vN;
+void main(){ vW = aP; vN = aN; gl_Position = uVP*vec4(aP,1.0); }`;
+const FS_WORLD = `#version 300 es
+precision highp float;
+in vec3 vW, vN;
+uniform sampler2D uT0, uT1, uT2, uT3, uZ0, uZ1, uZ2, uZ3, uTop;
+uniform mat4 uInv[4];        // turntable space -> each view's camera space
+uniform vec4 uPar[4];        // depth scale k, pivot disparity, picture aspect, relief gain
+uniform vec3 uPlane[4], uEyeOf[4];
+uniform float uPri[4];       // how much a view counts; 0 = not there
+uniform float uCam, uCell;
+uniform vec2 uClip, uBox;
+uniform int uMode;
+uniform vec3 uLight, uFog, uEye;
+out vec4 o;
+vec3 ramp(float t){
+  vec3 a=vec3(0.05,0.08,0.20), b=vec3(0.10,0.55,0.66), c=vec3(0.94,0.90,0.80), d=vec3(0.97,0.62,0.18);
+  return t<0.4 ? mix(a,b,t/0.4) : t<0.75 ? mix(b,c,(t-0.4)/0.35) : mix(c,d,(t-0.75)/0.25);
+}
+// What one view shows at this point of the terrain, weighted by how squarely it faced the surface;
+// nothing if the point lies outside its picture or behind something in it.
+vec4 seen(sampler2D tex, sampler2D dep, int i, vec3 P, vec3 N){
+  if(uPri[i] <= 0.0) return vec4(0.0);
+  vec3 pc = (uInv[i]*vec4(P,1.0)).xyz;
+  float s = (uCam-pc.z)/uCam; if(s < 0.05) return vec4(0.0);
+  vec2 q = pc.xy/s, uv = vec2(q.x/uPar[i].z*0.5+0.5, 0.5-q.y*0.5), e = min(uv, 1.0-uv);
+  float inFrame = smoothstep(0.0, 0.015, min(e.x,e.y)); if(inFrame <= 0.0) return vec4(0.0);
+  float g = dot(uPlane[i], vec3(q,1.0)), dv = texture(dep,uv).r; dv = g+uPar[i].w*(dv-g);   // the view's own surface on this ray
+  float dp = uPar[i].y+(1.0/s-1.0)/uPar[i].x;                                               // our point on the same ray
+  float vis = smoothstep(-0.05, -0.018, dp-dv);
+  float facing = max(dot(N, normalize(uEyeOf[i]-P)), 0.0);
+  float w = uPri[i]*inFrame*vis*(0.015+facing*facing*facing);
+  return vec4(texture(tex,uv).rgb*w, w);
+}
+void main(){
+  vec2 q = vW.xz/uClip; q *= q;
+  float rr = sqrt(sqrt(dot(q,q))); if(rr > 1.0) discard;
+  vec3 n = normalize(vN), col;
+  float lam = max(dot(n,uLight),0.0), hgt = clamp(0.36+vW.y*0.9, 0.0, 1.0);
+  if(uMode==0){
+    vec3 top = texture(uTop, vec2(vW.x/uBox.x, vW.z/uBox.y)*0.5+0.5).rgb;
+    vec4 a = seen(uT0,uZ0,0,vW,n)+seen(uT1,uZ1,1,vW,n)+seen(uT2,uZ2,2,vW,n)+seen(uT3,uZ3,3,vW,n);
+    col = mix(top, a.rgb/max(a.a,1e-5), clamp(a.a*40.0,0.0,1.0));
+  } else if(uMode==1){
+    vec3 v = normalize(uEye-vW), h = normalize(v+uLight);
+    col = vec3(0.80,0.77,0.71)*(0.22+0.16*(0.5+0.5*n.y)+0.78*lam) + 0.08*pow(max(dot(n,h),0.0),24.0);
+  } else if(uMode==2){
+    vec2 g = vW.xz/uCell, f = abs(fract(g-0.5)-0.5)/fwidth(g);
+    col = mix(vec3(0.030,0.045,0.085), ramp(hgt)*1.12, 1.0-clamp(min(f.x,f.y)-0.15,0.0,1.0));
+  } else {
+    col = ramp(hgt)*(0.78+0.27*lam);
+  }
+  col = mix(col, uFog, (1.0-exp(-length(uEye-vW)*0.09))*0.55);   // a little haze with distance
+  col *= 1.0-0.5*smoothstep(0.975, 1.0, rr);
+  o = vec4(col,1.0);
+}`;
+const VS_SKY = `#version 300 es
+out vec2 vQ;
+void main(){ vec2 p = vec2(float((gl_VertexID<<1)&2), float(gl_VertexID&2)); vQ = p*2.0-1.0; gl_Position = vec4(vQ, 0.999, 1.0); }`;
+const FS_SKY = `#version 300 es
+precision highp float;
+in vec2 vQ;
+uniform vec3 uR, uU, uF, uSky0, uSky1, uSky2;    // camera axes; colour below, at and above the horizon
+uniform vec2 uTan;
+out vec4 o;
+void main(){
+  vec3 d = normalize(uF+uR*vQ.x*uTan.x+uU*vQ.y*uTan.y);
+  o = vec4(d.y < 0.0 ? mix(uSky1, uSky0, smoothstep(-0.02,-0.55,d.y)) : mix(uSky1, uSky2, smoothstep(0.0,0.75,d.y)), 1.0);
+}`;
+// 3. the explorer and its shadow
+const VS_SOLID = `#version 300 es
+precision highp float;
+layout(location=0) in vec3 aP;
+layout(location=1) in vec3 aN;
+layout(location=2) in vec3 aC;
+uniform mat4 uVP, uModel;
+out vec3 vN, vC;
+void main(){ vN = mat3(uModel)*aN; vC = aC; gl_Position = uVP*uModel*vec4(aP,1.0); }`;
+const FS_SOLID = `#version 300 es
+precision highp float;
+in vec3 vN, vC;
+uniform vec3 uLight;
+uniform float uAlpha;
+out vec4 o;
+void main(){ o = vec4(vC*(0.5+0.5*max(dot(normalize(vN),uLight),0.0)), uAlpha); }`;
 
 /*SHARED-BEGIN (also read by tools/glb.mjs) */
 const TAU = 0.03;      // a disparity step larger than this between neighbours counts as a depth jump
@@ -507,6 +636,23 @@ function initGL() {
     gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer()); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(p), gl.STATIC_DRAW);
     gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0); gl.bindVertexArray(null);
   }
+  const link = (vs, fs, names) => { const p = gl.createProgram(), u = {};
+    gl.attachShader(p, sh(gl.VERTEX_SHADER, vs)); gl.attachShader(p, sh(gl.FRAGMENT_SHADER, fs)); gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+    for (const n of names) u[n] = gl.getUniformLocation(p, n); return [p, u]; };
+  W.float = !!gl.getExtension('EXT_color_buffer_float');      // needed to read heights back; without it there is no walking
+  if (W.float) {
+    [W.pBake, W.uBake] = link(VS_BAKE, FS_BAKE, ['uModel', 'uK', 'uD0', 'uAspect', 'uCam', 'uGain', 'uPlane', 'uStep', 'uBox', 'uTex', 'uBg', 'uLayer']);
+    [W.pWorld, W.uWorld] = link(VS_WORLD, FS_WORLD, ['uVP', 'uInv', 'uPar', 'uPlane', 'uEyeOf', 'uPri', 'uCam', 'uCell', 'uClip', 'uBox', 'uMode', 'uLight', 'uFog', 'uEye', 'uT0', 'uT1', 'uT2', 'uT3', 'uZ0', 'uZ1', 'uZ2', 'uZ3', 'uTop']);
+    [W.pSky, W.uSky] = link(VS_SKY, FS_SKY, ['uR', 'uU', 'uF', 'uSky0', 'uSky1', 'uSky2', 'uTan']);
+    [W.pSolid, W.uSolid] = link(VS_SOLID, FS_SOLID, ['uVP', 'uModel', 'uLight', 'uAlpha']);
+    W.empty = gl.createVertexArray();
+    const fig = buildExplorer(); W.figCount = fig.body; W.shadowCount = fig.shadow;
+    W.figVao = gl.createVertexArray(); gl.bindVertexArray(W.figVao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer()); gl.bufferData(gl.ARRAY_BUFFER, fig.data, gl.STATIC_DRAW);
+    for (let a = 0; a < 3; a++) { gl.enableVertexAttribArray(a); gl.vertexAttribPointer(a, 3, gl.FLOAT, false, 36, a * 12); }
+    gl.bindVertexArray(null);
+  }
   gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LEQUAL); gl.clearColor(0.024, 0.039, 0.078, 1);
   gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 }
@@ -536,12 +682,14 @@ function uploadView(v) {
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, v.img); gl.generateMipmap(gl.TEXTURE_2D);
   v.texBg = makeTex(false);
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gw, gh, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(lay.bg.buffer));
+  v.texD = makeTex(false);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.R16F, gw, gh, 0, gl.RED, gl.FLOAT, d);
   v.verts = n * 2; v.tris = (v.layers[0].count + v.layers[1].count) / 3; v.lay = lay;
 }
 function freeView(v) {
   if (!v.layers) return;
   for (const L of v.layers) { gl.deleteVertexArray(L.vao); gl.deleteBuffer(L.buf); gl.deleteBuffer(L.idx); }
-  gl.deleteTexture(v.tex); gl.deleteTexture(v.texBg); v.layers = null;
+  gl.deleteTexture(v.tex); gl.deleteTexture(v.texBg); gl.deleteTexture(v.texD); v.layers = null;
 }
 
 // ---------- matrices ----------
@@ -574,6 +722,12 @@ function frame(now) {
   const dt = Math.min(0.05, (now - last) / 1000); last = now;
   const m = st.map;
   if (!m || document.hidden || st.paused) return;
+  if (st.view === 'walk') {                       // inside the fused world
+    resize();
+    if (W.stale || W.mapId !== m.id) buildWorld(m);
+    updateWalk(dt); drawWorld(camOfWalk());
+    return;
+  }
   const ease = 1 - Math.exp(-dt * 9), round = m.views.length > 1;
   const wantAuto = st.auto && !drag.active && now > st.idleAt && m.complete ? 1 : 0;
   st.autoMix += (wantAuto - st.autoMix) * (1 - Math.exp(-dt * 2.2));
@@ -671,6 +825,231 @@ function draw(yaw, pitch, zoom) {
   gl.disable(gl.POLYGON_OFFSET_FILL);
 }
 
+// ---------- the walkable world: every view fused into one terrain you can enter ----------
+const W = { stale: true, ready: false, float: false, mapId: '', cam: 'over', yaw: 0, pitch: 0.9, lift: 0, dist: 3.5, cd: 3.5, tgt: [0, 0, 0],
+  px: 0, pz: 0, py: 0, vy: 0, head: Math.PI, step: 0, keys: new Set(), stick: [0, 0], hover: false };
+const tanOfView = v => clamp(v.reg[4] / st.strength, 0.36, 8);
+// the slab the map stands on: as wide as the original picture, as deep as the ground it shows
+function slabOf(m) { const q = 1 / (CAM * tanOfView(m.views[0])), near = 1 / (1 + q); return [m.aspect * 0.97, Math.hypot(near, CAM * (1 - near)) * 1.12]; }
+function invPlace(m) {          // inverse of a placeView matrix (a scaled rotation plus a shift on the ground)
+  const s2 = m[0] * m[0] + m[1] * m[1] + m[2] * m[2], o = new Float32Array(16);
+  for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) o[c * 4 + r] = m[r * 4 + c] / s2;
+  for (let r = 0; r < 3; r++) o[12 + r] = -(o[r] * m[12] + o[4 + r] * m[13] + o[8 + r] * m[14]);
+  o[15] = 1; return o;
+}
+// A small explorer built from turned profiles (an original figure: bell body, round head, visor, pack, antenna).
+function buildExplorer() {
+  const out = [];
+  const lathe = (prof, col, ox, oy, oz, seg = 20) => {
+    for (let i = 0; i < prof.length - 1; i++) {
+      const [r0, y0] = prof[i], [r1, y1] = prof[i + 1], dy = y1 - y0, dr = r1 - r0, l = Math.hypot(dy, dr) || 1, ny = -dr / l, nr = dy / l;
+      const P = (r, y, a) => [ox + r * Math.cos(a), oy + y, oz + r * Math.sin(a), nr * Math.cos(a), ny, nr * Math.sin(a), col[0], col[1], col[2]];
+      for (let s = 0; s < seg; s++) { const a0 = s / seg * 2 * Math.PI, a1 = (s + 1) / seg * 2 * Math.PI;
+        out.push(...P(r0, y0, a0), ...P(r1, y1, a0), ...P(r1, y1, a1), ...P(r0, y0, a0), ...P(r1, y1, a1), ...P(r0, y0, a1)); }
+    }
+  };
+  const ball = (r, col, ox, oy, oz, sy = 1) => { const prof = []; for (let i = 0; i <= 10; i++) { const t = -Math.PI / 2 + i / 10 * Math.PI; prof.push([r * Math.cos(t), r * sy * Math.sin(t)]); } lathe(prof, col, ox, oy, oz, 18); };
+  const cream = [0.94, 0.90, 0.82], cyan = [0.27, 0.84, 0.91], navy = [0.07, 0.10, 0.19], amber = [0.96, 0.66, 0.23];
+  lathe([[0, 0.012], [0.034, 0.012], [0.046, 0.03], [0.044, 0.07], [0.03, 0.096], [0, 0.1]], cream, 0, 0, 0);
+  lathe([[0.0465, 0.036], [0.049, 0.042], [0.0465, 0.048]], cyan, 0, 0, 0);
+  ball(0.038, cream, 0, 0.128, 0); ball(0.027, navy, 0, 0.13, 0.019, 0.8);
+  ball(0.006, cyan, -0.011, 0.133, 0.043); ball(0.006, cyan, 0.011, 0.133, 0.043);
+  ball(0.016, navy, -0.02, 0.012, 0.004, 0.7); ball(0.016, navy, 0.02, 0.012, 0.004, 0.7);
+  lathe([[0.003, 0.16], [0.003, 0.186]], navy, 0, 0, 0, 6); ball(0.008, amber, 0, 0.191, 0);
+  lathe([[0, 0.046], [0.02, 0.046], [0.02, 0.086], [0, 0.086]], cyan, 0, 0, -0.045, 10);
+  const body = out.length / 9;
+  for (let s = 0; s < 20; s++) { const a0 = s / 20 * 2 * Math.PI, a1 = (s + 1) / 20 * 2 * Math.PI;      // shadow: a dark disc under the feet
+    out.push(0, 0, 0, 0, 1, 0, 0, 0, 0, 0.055 * Math.cos(a0), 0, 0.055 * Math.sin(a0), 0, 1, 0, 0, 0, 0, 0.055 * Math.cos(a1), 0, 0.055 * Math.sin(a1), 0, 1, 0, 0, 0, 0); }
+  return { data: new Float32Array(out), body, shadow: out.length / 9 - body };
+}
+// Fuse the views into one terrain: look at every view's mesh from straight above, keep per ground cell
+// the height and colour of what was really seen (the original picture first), fill the rest.
+function buildWorld(m) {
+  const [bx, bz] = slabOf(m), gw = 400, gh = Math.max(64, Math.round(gw * bz / bx)), n = gw * gh;
+  if (!W.fbo || W.gw !== gw || W.gh !== gh) {
+    if (W.fbo) { gl.deleteFramebuffer(W.fbo); gl.deleteTexture(W.tCol); gl.deleteTexture(W.tHgt); gl.deleteRenderbuffer(W.rb); }
+    W.fbo = gl.createFramebuffer(); gl.bindFramebuffer(gl.FRAMEBUFFER, W.fbo);
+    W.tCol = makeTex(false); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gw, gh, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, W.tCol, 0);
+    W.tHgt = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, W.tHgt); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, gw, gh, 0, gl.RGBA, gl.FLOAT, null);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, W.tHgt, 0);
+    W.rb = gl.createRenderbuffer(); gl.bindRenderbuffer(gl.RENDERBUFFER, W.rb); gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT24, gw, gh);
+    gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, W.rb);
+  }
+  const rank = d => d === 0 ? 0 : d === 180 ? 1 : d === 90 ? 2 : 3;
+  W.views = m.views.filter(v => v.deg % 90 === 0).slice(0, 4);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, W.fbo); gl.viewport(0, 0, gw, gh); gl.disable(gl.BLEND); gl.disable(gl.POLYGON_OFFSET_FILL);
+  gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
+  gl.useProgram(W.pBake); const ub = W.uBake;
+  gl.uniform1f(ub.uCam, CAM); gl.uniform2f(ub.uBox, bx, bz); gl.uniform1i(ub.uTex, 0); gl.uniform1i(ub.uBg, 1);
+  const bakes = W.views.slice().sort((a, b) => rank(a.deg) - rank(b.deg)).map(v => {
+    gl.clearBufferfv(gl.COLOR, 0, [0, 0, 0, 0]); gl.clearBufferfv(gl.COLOR, 1, [0, 0, 0, 0]); gl.clear(gl.DEPTH_BUFFER_BIT);
+    const pl = placeView(v.plane, v.deg, tanOfView(v), CAM, v.reg);
+    gl.uniformMatrix4fv(ub.uModel, false, pl.m); gl.uniform1f(ub.uK, pl.k); gl.uniform1f(ub.uD0, pl.d0); gl.uniform1f(ub.uAspect, v.w / v.h);
+    gl.uniform2f(ub.uStep, 1 / (v.gw - 1), 1 / (v.gh - 1)); gl.uniform3f(ub.uPlane, v.plane.a, v.plane.b, v.plane.c); gl.uniform1f(ub.uGain, v.reg[5] == null ? 1 : v.reg[5]);
+    gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, v.texBg); gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, v.tex);
+    for (let li = 1; li >= 0; li--) { const Ly = v.layers[li]; if (!Ly.count) continue; gl.bindVertexArray(Ly.vao); gl.uniform1i(ub.uLayer, li); gl.drawElements(gl.TRIANGLES, Ly.count, gl.UNSIGNED_INT, 0); }
+    const col = new Uint8Array(n * 4), hgt = new Float32Array(n * 4);
+    gl.readBuffer(gl.COLOR_ATTACHMENT0); gl.readPixels(0, 0, gw, gh, gl.RGBA, gl.UNSIGNED_BYTE, col);
+    gl.readBuffer(gl.COLOR_ATTACHMENT1); gl.readPixels(0, 0, gw, gh, gl.RGBA, gl.FLOAT, hgt);
+    return { col, hgt };
+  });
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.bindVertexArray(null);
+  // The shape of the world comes from the original picture alone: views drawn afresh never line up with it
+  // exactly, and stacking their shapes would double every object. Where the original sees nothing (behind
+  // things, off its frame) the world is ground, coloured by a view that does see that ground.
+  const H = new Float32Array(n), C = new Uint8Array(n * 4), has = new Uint8Array(n);
+  bakes.forEach((b, bi) => { for (const need of [0.75, 0.25]) for (let i = 0; i < n; i++) {
+    if (has[i] || b.hgt[i * 4 + 1] < need || b.hgt[i * 4 + 1] >= need + 0.5) continue;
+    const h = b.hgt[i * 4]; if (bi && h > 0.06) continue;                 // another view's things stay out
+    H[i] = bi ? clamp(h, -0.12, 0.02) : clamp(h, -0.12, 1.1); C[i * 4] = b.col[i * 4]; C[i * 4 + 1] = b.col[i * 4 + 1]; C[i * 4 + 2] = b.col[i * 4 + 2]; C[i * 4 + 3] = 255; has[i] = 1;
+  } });
+  for (let pass = 0; pass < 80; pass++) {            // cells nobody covers: flat ground in the colour next to them
+    const add = []; 
+    for (let i = 0; i < n; i++) { if (has[i]) continue; const x = i % gw; let r = 0, g = 0, b = 0, k = 0;
+      for (const j of [x > 0 ? i - 1 : -1, x < gw - 1 ? i + 1 : -1, i - gw, i + gw]) if (j >= 0 && j < n && has[j]) { r += C[j * 4]; g += C[j * 4 + 1]; b += C[j * 4 + 2]; k++; }
+      if (k) add.push(i, r / k, g / k, b / k); }
+    if (!add.length) break;
+    for (let a = 0; a < add.length; a += 4) { const i = add[a]; C[i * 4] = add[a + 1]; C[i * 4 + 1] = add[a + 2]; C[i * 4 + 2] = add[a + 3]; C[i * 4 + 3] = 255; has[i] = 1; }
+  }
+  // tidy the heights: drop single-cell spikes, then even out small ripples without softening cliffs
+  const med = new Float32Array(n), nine = new Float32Array(9);
+  for (let y = 0; y < gh; y++) for (let x = 0; x < gw; x++) { let k = 0;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) nine[k++] = H[clamp(y + dy, 0, gh - 1) * gw + clamp(x + dx, 0, gw - 1)];
+    nine.sort(); med[y * gw + x] = nine[4]; }
+  for (let y = 0; y < gh; y++) for (let x = 0; x < gw; x++) { const c = med[y * gw + x]; let s = 0, k = 0;
+    for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) { const v = med[clamp(y + dy, 0, gh - 1) * gw + clamp(x + dx, 0, gw - 1)]; if (Math.abs(v - c) < 0.02) { s += v; k++; } }
+    H[y * gw + x] = s / k; }
+  // the terrain mesh
+  const pos = new Float32Array(n * 6), cx = 2 * bx / (gw - 1), cz = 2 * bz / (gh - 1), idx = new Uint32Array((gw - 1) * (gh - 1) * 6);
+  for (let y = 0, i = 0; y < gh; y++) for (let x = 0; x < gw; x++, i++) {
+    const hx = (H[y * gw + Math.min(gw - 1, x + 1)] - H[y * gw + Math.max(0, x - 1)]) / (2 * cx), hz = (H[Math.min(gh - 1, y + 1) * gw + x] - H[Math.max(0, y - 1) * gw + x]) / (2 * cz), l = Math.hypot(hx, 1, hz);
+    pos[i * 6] = -bx + x * cx; pos[i * 6 + 1] = H[i]; pos[i * 6 + 2] = -bz + y * cz; pos[i * 6 + 3] = -hx / l; pos[i * 6 + 4] = 1 / l; pos[i * 6 + 5] = -hz / l;
+  }
+  for (let y = 0, k = 0; y < gh - 1; y++) for (let x = 0; x < gw - 1; x++) { const p = y * gw + x; idx[k++] = p; idx[k++] = p + gw; idx[k++] = p + gw + 1; idx[k++] = p; idx[k++] = p + gw + 1; idx[k++] = p + 1; }
+  if (!W.vao) { W.vao = gl.createVertexArray(); W.vbuf = gl.createBuffer(); W.ibuf = gl.createBuffer(); W.texTop = makeTex(false); }
+  gl.bindVertexArray(W.vao);
+  gl.bindBuffer(gl.ARRAY_BUFFER, W.vbuf); gl.bufferData(gl.ARRAY_BUFFER, pos, gl.DYNAMIC_DRAW);
+  gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 24, 0); gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 24, 12);
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, W.ibuf); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, idx, gl.DYNAMIC_DRAW); gl.bindVertexArray(null);
+  gl.bindTexture(gl.TEXTURE_2D, W.texTop); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gw, gh, 0, gl.RGBA, gl.UNSIGNED_BYTE, C);
+  let ar = 0, ag = 0, ab = 0; for (let i = 0; i < n; i += 7) { ar += C[i * 4]; ag += C[i * 4 + 1]; ab += C[i * 4 + 2]; }
+  const k = 7 / n / 255; W.avg = [ar * k, ag * k, ab * k];
+  Object.assign(W, { H, gw, gh, bx, bz, count: idx.length, verts: n, stale: false, ready: true });
+  { const v0 = m.views[0]; W.inv0 = invPlace(placeView(v0.plane, 0, tanOfView(v0), CAM, v0.reg).m); W.asp0 = v0.w / v0.h;
+    const mini = $('mini'); mini.style.backgroundImage = `url(tex/${m.id}.webp)`; mini.style.aspectRatio = String(W.asp0); }
+  if (W.mapId !== m.id) {                            // a new map: stand on open, level ground near the middle, look at it as the picture does
+    W.mapId = m.id; let best = 1e9, sx = 0, sz = 0;
+    const sorted = Float32Array.from(H).sort(), floor = sorted[Math.floor(n * 0.3)];      // the common low level: the floor of the map
+    for (let y = 10; y < gh - 10; y += 3) for (let x = 10; x < gw - 10; x += 3) { const wx = -bx + x * cx, wz = -bz + y * cz, c = H[y * gw + x];
+      const cost = wx * wx + wz * wz * 1.6 + Math.max(0, c - floor - 0.03) * 30; if (cost >= best) continue;
+      let flat = true; for (let dy = -8; dy <= 8 && flat; dy += 4) for (let dx = -8; dx <= 8; dx += 4) if (Math.abs(H[(y + dy) * gw + x + dx] - c) > 0.03) { flat = false; break; }
+      if (flat) { best = cost; sx = wx; sz = wz; } }
+    W.sx = sx; W.sz = sz; respawn(); setCam('over'); W.cd = W.dist; W.tgt = [0, 0, 0];
+  }
+  $('hudStat').textContent = `统一地形 · ${n.toLocaleString('en-US')} 顶点 · ${(idx.length / 3).toLocaleString('en-US')} 三角面 · 融合 ${W.views.length} 个方位视图`;
+}
+function heightAt(x, z) {
+  const fx = clamp((x + W.bx) / (2 * W.bx) * (W.gw - 1), 0, W.gw - 1.001), fz = clamp((z + W.bz) / (2 * W.bz) * (W.gh - 1), 0, W.gh - 1.001);
+  const ix = Math.floor(fx), iz = Math.floor(fz), tx = fx - ix, tz = fz - iz, i = iz * W.gw + ix, H = W.H;
+  return (H[i] * (1 - tx) + H[i + 1] * tx) * (1 - tz) + (H[i + W.gw] * (1 - tx) + H[i + W.gw + 1] * tx) * tz;
+}
+const groundAt = (x, z) => Math.max(heightAt(x, z), heightAt(x + 0.022, z), heightAt(x - 0.022, z), heightAt(x, z + 0.022), heightAt(x, z - 0.022));
+function respawn() { W.px = W.sx; W.pz = W.sz; W.py = groundAt(W.sx, W.sz); W.vy = 0; W.head = Math.PI; }
+function setCam(c) {
+  W.cam = c; const m = st.map;
+  if (c === 'over') { W.yaw = 0; W.pitch = Math.atan(tanOfView(m.views[0])); W.dist = CAM * Math.max(1, m.aspect / (canvas.width / canvas.height)); }
+  else if (c === 'third') { W.dist = 1.5; W.pitch = clamp(W.pitch, 0.3, 0.75); }
+  else W.pitch = 0.06;
+  for (const b of $('cams').children) b.setAttribute('aria-pressed', b.dataset.cam === c ? 'true' : 'false');
+}
+// Can the explorer move by (mx, mz)? It must stay on the slab, and the ground a short step ahead (always the same
+// distance, whatever the frame rate) may not rise more than a small ledge: steep faces and walls stop it.
+function canStep(mx, mz) {
+  const x = W.px + mx, z = W.pz + mz, a = x / W.bx, b = z / W.bz; if (a * a * a * a + b * b * b * b >= 0.84) return false;
+  const l = Math.hypot(mx, mz) || 1; return groundAt(W.px + mx / l * 0.035, W.pz + mz / l * 0.035) - W.py <= 0.04;
+}
+function updateWalk(dt) {
+  const k = W.keys, on = (...n) => n.some(x => k.has(x)) ? 1 : 0;
+  let ix = on('d', 'arrowright') - on('a', 'arrowleft') + W.stick[0], iz = on('w', 'arrowup') - on('s', 'arrowdown') - W.stick[1];
+  const len = Math.hypot(ix, iz);
+  if (len > 0.08) {
+    if (W.cam === 'over') setCam('third');
+    ix /= Math.max(1, len); iz /= Math.max(1, len);
+    const sp = (k.has('shift') ? 0.85 : 0.48) * dt, dx = (-Math.sin(W.yaw) * iz + Math.cos(W.yaw) * ix) * sp, dz = (-Math.cos(W.yaw) * iz - Math.sin(W.yaw) * ix) * sp;
+    if (canStep(dx, dz)) { W.px += dx; W.pz += dz; } else if (dx && canStep(dx, 0)) W.px += dx; else if (dz && canStep(0, dz)) W.pz += dz;      // blocked: slide along it
+    let turn = Math.atan2(dx, dz) - W.head; turn = ((turn + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
+    W.head += turn * Math.min(1, dt * 12); W.step += dt * Math.min(1, len) * 11;
+  }
+  const g = groundAt(W.px, W.pz);
+  if (W.py > g + 0.003 || W.vy > 0) { W.vy -= 2.2 * dt; W.py += W.vy * dt; if (W.py <= g) { W.py = g; W.vy = 0; } }   // in the air
+  else { W.py += (g - W.py) * Math.min(1, dt * 18); W.vy = 0; if (k.has(' ')) W.vy = 0.62; }                            // on the ground; space jumps
+  const want = W.cam === 'over' ? [0, 0, 0] : [W.px, W.py + 0.11, W.pz], e = 1 - Math.exp(-dt * 8);
+  for (let i = 0; i < 3; i++) W.tgt[i] += (want[i] - W.tgt[i]) * e;
+  W.cd += (W.dist - W.cd) * (1 - Math.exp(-dt * 5));
+  W.lift += (liftNeeded() - W.lift) * (1 - Math.exp(-dt * 6));
+  // the dot on the little map: where the explorer's feet fall in the original picture
+  const i = W.inv0, cx = i[0] * W.px + i[4] * W.py + i[8] * W.pz + i[12], cy = i[1] * W.px + i[5] * W.py + i[9] * W.pz + i[13], sc = (CAM - (i[2] * W.px + i[6] * W.py + i[10] * W.pz + i[14])) / CAM, dot = $('mini').firstElementChild;
+  dot.style.left = clamp(cx / sc / W.asp0 * 50 + 50, 0, 100) + '%'; dot.style.top = clamp(50 - cy / sc * 50, 0, 100) + '%';
+}
+// Is the line from the explorer to a camera at this height angle and distance clear of the terrain?
+function sightClear(pitch, d) {
+  const t = W.tgt, cp = Math.cos(pitch), sx = Math.sin(W.yaw) * cp, sy = Math.sin(pitch), sz = Math.cos(W.yaw) * cp;
+  for (let s = 1; s <= 14; s++) { const f = s / 14 * d; if (t[1] + sy * f < heightAt(t[0] + sx * f, t[2] + sz * f) + 0.03) return false; }
+  return true;
+}
+function liftNeeded() { let need = 0; if (W.cam === 'third') while (need < 1.2 && !sightClear(Math.min(1.45, W.pitch + need), W.cd)) need += 0.07; return need; }
+function camOfWalk() {
+  if (W.cam === 'first') {
+    const e = [W.px, W.py + 0.145, W.pz], cp = Math.cos(W.pitch);
+    return { eye: e, at: [e[0] - Math.sin(W.yaw) * cp, e[1] - Math.sin(W.pitch), e[2] - Math.cos(W.yaw) * cp], fov: 64 * RAD, first: true };
+  }
+  const pitch = W.cam === 'third' ? Math.min(1.45, W.pitch + W.lift) : W.pitch;
+  const t = W.tgt, cp = Math.cos(pitch), dir = [Math.sin(W.yaw) * cp, Math.sin(pitch), Math.cos(W.yaw) * cp]; let d = W.cd;
+  if (W.cam === 'third') for (let s = 1; s <= 12; s++) {         // still blocked while the lift catches up: come closer for now
+    const f = s / 12 * d; if (t[1] + dir[1] * f < heightAt(t[0] + dir[0] * f, t[2] + dir[2] * f) + 0.02) { d = Math.max(0.45, (s - 1) / 12 * d); break; } }
+  return { eye: [t[0] + dir[0] * d, t[1] + dir[1] * d, t[2] + dir[2] * d], at: [t[0], t[1], t[2]], fov: FOVY, first: false };
+}
+function drawWorld(c) {
+  const m = st.map, ca = canvas.width / canvas.height, view = lookAt(c.eye, c.at, [0, 1, 0]), vp = mul(perspective(c.fov, ca, 0.02, 60), view);
+  const L = [0.42, 0.8, 0.43], a = W.avg, fog = [a[0] * 0.55 + 0.25, a[1] * 0.55 + 0.27, a[2] * 0.55 + 0.32];
+  gl.viewport(0, 0, canvas.width, canvas.height); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT); gl.disable(gl.BLEND); gl.disable(gl.POLYGON_OFFSET_FILL);
+  // sky
+  gl.disable(gl.DEPTH_TEST); gl.useProgram(W.pSky); gl.bindVertexArray(W.empty); const us = W.uSky, th = Math.tan(c.fov / 2);
+  gl.uniform3f(us.uR, view[0], view[4], view[8]); gl.uniform3f(us.uU, view[1], view[5], view[9]); gl.uniform3f(us.uF, -view[2], -view[6], -view[10]); gl.uniform2f(us.uTan, th * ca, th);
+  gl.uniform3f(us.uSky0, 0.024, 0.039, 0.078); gl.uniform3f(us.uSky1, fog[0], fog[1], fog[2]); gl.uniform3f(us.uSky2, a[0] * 0.3 + 0.05, a[1] * 0.3 + 0.08, a[2] * 0.3 + 0.16);
+  gl.drawArrays(gl.TRIANGLES, 0, 3); gl.enable(gl.DEPTH_TEST);
+  // the rim of the slab
+  gl.useProgram(progBase); gl.bindVertexArray(baseVao);
+  gl.uniformMatrix4fv(UB.uVP, false, vp); gl.uniform2f(UB.uClip, W.bx, W.bz); gl.uniform3f(UB.uLight, L[0], L[1], L[2]); gl.drawArrays(gl.TRIANGLE_STRIP, 0, baseWall);
+  // terrain, coloured from the views
+  gl.useProgram(W.pWorld); const u = W.uWorld, inv = new Float32Array(64), par = new Float32Array(16), pln = new Float32Array(12), eyes = new Float32Array(12), pri = new Float32Array(4);
+  W.views.forEach((v, i) => {
+    const pl = placeView(v.plane, v.deg, tanOfView(v), CAM, v.reg), M = pl.m;
+    inv.set(invPlace(M), i * 16); par.set([pl.k, pl.d0, v.w / v.h, v.reg[5] == null ? 1 : v.reg[5]], i * 4); pln.set([v.plane.a, v.plane.b, v.plane.c], i * 3);
+    eyes.set([M[8] * CAM + M[12], M[9] * CAM, M[10] * CAM + M[14]], i * 3); pri[i] = v.deg === 0 ? 40 : 1;
+    gl.activeTexture(gl.TEXTURE0 + i); gl.bindTexture(gl.TEXTURE_2D, v.tex); gl.activeTexture(gl.TEXTURE4 + i); gl.bindTexture(gl.TEXTURE_2D, v.texD);
+  });
+  for (let i = W.views.length; i < 4; i++) { gl.activeTexture(gl.TEXTURE0 + i); gl.bindTexture(gl.TEXTURE_2D, W.views[0].tex); gl.activeTexture(gl.TEXTURE4 + i); gl.bindTexture(gl.TEXTURE_2D, W.views[0].texD); }
+  gl.activeTexture(gl.TEXTURE8); gl.bindTexture(gl.TEXTURE_2D, W.texTop); gl.activeTexture(gl.TEXTURE0);
+  for (let i = 0; i < 4; i++) { gl.uniform1i(u['uT' + i], i); gl.uniform1i(u['uZ' + i], 4 + i); }
+  gl.uniform1i(u.uTop, 8); gl.uniformMatrix4fv(u.uVP, false, vp); gl.uniformMatrix4fv(u.uInv, false, inv); gl.uniform4fv(u.uPar, par); gl.uniform3fv(u.uPlane, pln); gl.uniform3fv(u.uEyeOf, eyes); gl.uniform1fv(u.uPri, pri);
+  gl.uniform1f(u.uCam, CAM); gl.uniform1f(u.uCell, 2 * W.bx / (W.gw - 1) * 8); gl.uniform2f(u.uClip, W.bx, W.bz); gl.uniform2f(u.uBox, W.bx, W.bz); gl.uniform1i(u.uMode, st.mode);
+  gl.uniform3f(u.uLight, L[0], L[1], L[2]); gl.uniform3f(u.uFog, fog[0], fog[1], fog[2]); gl.uniform3f(u.uEye, c.eye[0], c.eye[1], c.eye[2]);
+  gl.bindVertexArray(W.vao); gl.drawElements(gl.TRIANGLES, W.count, gl.UNSIGNED_INT, 0);
+  // the explorer (not when we look through its eyes) and its shadow
+  if (!c.first) {
+    gl.useProgram(W.pSolid); const uo = W.uSolid, ch = Math.cos(W.head), sh = Math.sin(W.head), air = W.py - groundAt(W.px, W.pz), bob = air < 0.01 ? Math.abs(Math.sin(W.step)) * 0.008 : 0;
+    gl.uniformMatrix4fv(uo.uVP, false, vp); gl.uniform3f(uo.uLight, L[0], L[1], L[2]); gl.bindVertexArray(W.figVao);
+    gl.enable(gl.BLEND); gl.depthMask(false); gl.uniform1f(uo.uAlpha, 0.38);
+    gl.uniformMatrix4fv(uo.uModel, false, [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, W.px, W.py - air + 0.006, W.pz, 1]); gl.drawArrays(gl.TRIANGLES, W.figCount, W.shadowCount);
+    gl.disable(gl.BLEND); gl.depthMask(true); gl.uniform1f(uo.uAlpha, 1);
+    gl.uniformMatrix4fv(uo.uModel, false, [ch, 0, -sh, 0, 0, 1, 0, 0, sh, 0, ch, 0, W.px, W.py + bob, W.pz, 1]); gl.drawArrays(gl.TRIANGLES, 0, W.figCount);
+  }
+  gl.bindVertexArray(null);
+}
+
 // ---------- loading ----------
 const cache = new Map();
 function loadImage(url) {
@@ -735,7 +1114,7 @@ async function select(i, fromUser) {
     if (st.cur !== i) return;                 // a newer pick won the race
     if (!gl) { flat.src = v0.img.src; busy.hidden = true; return; }
     const old = st.map, m = { i, id: rec.id, views: [], complete: rec.rest.length === 0, aspect: v0.w / v0.h };
-    const add = v => { const u = { ...v }; uploadView(u); m.views.push(u); m.views.sort((p, q) => p.deg - q.deg); return u; };
+    const add = v => { const u = { ...v }; uploadView(u); m.views.push(u); m.views.sort((p, q) => p.deg - q.deg); W.stale = true; return u; };
     const u0 = add(v0);
     // a lone view has no side views to calibrate against: read its camera height angle off the ground slope at a moderate depth scale
     if (!u0.reg) u0.reg = [1, 0, 0, 0, clamp(1 / (CAM * 0.55 * Math.hypot(u0.plane.a, u0.plane.b)), Math.tan(40 * RAD), Math.tan(78 * RAD))];
@@ -761,12 +1140,17 @@ async function select(i, fromUser) {
 const drag = { active: false, pts: new Map(), pinch: 0 };
 function nudgeIdle() { st.idleAt = performance.now() + 2600; }
 canvas.addEventListener('pointerdown', e => {
-  canvas.setPointerCapture(e.pointerId); drag.pts.set(e.pointerId, [e.clientX, e.clientY]);
+  canvas.focus({ preventScroll: true }); canvas.setPointerCapture(e.pointerId); drag.pts.set(e.pointerId, [e.clientX, e.clientY]);
   drag.active = true; drag.pinch = 0; canvas.classList.add('dragging');
 });
 canvas.addEventListener('pointermove', e => {
   const p = drag.pts.get(e.pointerId); if (!p) return;
   const dx = e.clientX - p[0], dy = e.clientY - p[1]; p[0] = e.clientX; p[1] = e.clientY;
+  if (st.view === 'walk') {
+    if (drag.pts.size === 1) { const s = 2.6 / canvas.clientHeight, lim = W.cam === 'first' ? [-1.3, 1.3] : [0.08, 1.5]; W.yaw -= dx * s; W.pitch = clamp(W.pitch + dy * s, lim[0], lim[1]); }
+    else if (drag.pts.size === 2) { const [a, b] = [...drag.pts.values()], dd = Math.hypot(a[0] - b[0], a[1] - b[1]); if (drag.pinch) W.dist = clamp(W.dist * drag.pinch / dd, 0.5, 7); drag.pinch = dd; }
+    return;
+  }
   if (drag.pts.size === 1) {
     const s = 2.6 / canvas.clientHeight, round = st.map && st.map.views.length > 1;
     st.tYaw -= dx * s; if (!round) st.tYaw = clamp(st.tYaw, -0.8, 0.8);
@@ -781,15 +1165,26 @@ const endDrag = e => { drag.pts.delete(e.pointerId); drag.pinch = 0; if (!drag.p
 canvas.addEventListener('pointerup', endDrag); canvas.addEventListener('pointercancel', endDrag);
 canvas.addEventListener('wheel', e => {
   if (!(e.ctrlKey || e.metaKey || document.fullscreenElement)) return;   // plain wheel keeps scrolling the page
-  e.preventDefault(); st.tZoom = clamp(st.tZoom * Math.exp(e.deltaY * 0.0022), 0.35, 2.4); nudgeIdle();
+  e.preventDefault();
+  if (st.view === 'walk') W.dist = clamp(W.dist * Math.exp(e.deltaY * 0.0022), 0.5, 7);
+  else { st.tZoom = clamp(st.tZoom * Math.exp(e.deltaY * 0.0022), 0.35, 2.4); nudgeIdle(); }
 }, { passive: false });
-function resetView() { st.tYaw = Math.round(st.tYaw / (2 * Math.PI)) * 2 * Math.PI; st.tPitch = 0; st.tZoom = 1; st.idleAt = performance.now() + 4000; }
+function resetView() { if (st.view === 'walk') { if (W.ready) { respawn(); setCam('over'); } return; } st.tYaw = Math.round(st.tYaw / (2 * Math.PI)) * 2 * Math.PI; st.tPitch = 0; st.tZoom = 1; st.idleAt = performance.now() + 4000; }
 canvas.addEventListener('dblclick', resetView);
 $('reset').addEventListener('click', resetView);
 $('prev').addEventListener('click', () => select(st.cur - 1, true));
 $('next').addEventListener('click', () => select(st.cur + 1, true));
 addEventListener('keydown', e => {
   if (e.target instanceof HTMLInputElement || e.altKey || e.ctrlKey || e.metaKey) return;
+  if (st.view === 'walk') {
+    const k = e.key.toLowerCase(), mine = W.hover || document.activeElement === canvas || !!document.fullscreenElement;
+    if (!W.ready || !mine) return;
+    if (['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' ', 'shift'].includes(k)) { W.keys.add(k); e.preventDefault(); }
+    else if (k === 'v') setCam(W.cam === 'first' ? 'third' : 'first');
+    else if (k === 'm') setCam('over');
+    else if (k === 'r') respawn();
+    return;
+  }
   if (e.key === 'ArrowLeft') { select(st.cur - 1, true); e.preventDefault(); }
   if (e.key === 'ArrowRight') { select(st.cur + 1, true); e.preventDefault(); }
 });
@@ -804,6 +1199,31 @@ $('fs').addEventListener('click', () => {
 document.addEventListener('fullscreenchange', () => { $('fs').textContent = document.fullscreenElement ? '退出全屏' : '全屏'; st.dirty = true; });
 new ResizeObserver(() => { st.dirty = true; }).observe(stage);
 document.addEventListener('visibilitychange', () => { st.dirty = true; });
+
+// ---------- walking: view switch, keys, touch stick ----------
+const HINT = { walk: 'W A S D 走动 · 拖动转视角 · 空格跳 · Shift 跑 · V 切换第一/第三人称 · M 全景', orbit: '拖动环绕 · Ctrl + 滚轮或双指缩放 · 双击复位 · ← → 换图' };
+function setView(v) {
+  if (v === 'walk' && !W.float) v = 'orbit';
+  st.view = v; st.dirty = true; W.stale = true; W.keys.clear(); W.stick = [0, 0];
+  $('cams').hidden = v !== 'walk'; $('snaps').hidden = v === 'walk'; $('autoTick').hidden = v === 'walk';
+  $('mini').hidden = v !== 'walk';
+  $('hint').textContent = HINT[v]; $('stick').hidden = !(v === 'walk' && matchMedia('(pointer: coarse)').matches);
+  if (v === 'orbit' && st.map) showStats(st.map);
+}
+$('views').addEventListener('change', e => setView(e.target.value));
+$('cams').addEventListener('click', e => { const b = e.target.closest('button'); if (b && W.ready) { if (b.dataset.cam === 'spawn') { respawn(); setCam('third'); } else setCam(b.dataset.cam); canvas.focus(); } });
+$('depthK').addEventListener('change', () => { W.stale = true; });
+stage.addEventListener('pointerenter', () => { W.hover = true; }); stage.addEventListener('pointerleave', () => { W.hover = false; });
+addEventListener('keyup', e => { W.keys.delete(e.key.toLowerCase()); });
+addEventListener('blur', () => { W.keys.clear(); });
+{ const pad0 = $('stick'), knob = pad0.firstElementChild; let id = null;
+  const move = e => { const r = pad0.getBoundingClientRect(), x = clamp((e.clientX - r.left) / r.width * 2 - 1, -1, 1), y = clamp((e.clientY - r.top) / r.height * 2 - 1, -1, 1), l = Math.max(1, Math.hypot(x, y));
+    W.stick = [x / l, y / l]; knob.style.transform = `translate(${x / l * 30}px, ${y / l * 30}px)`; };
+  const end = () => { id = null; W.stick = [0, 0]; knob.style.transform = ''; };
+  pad0.addEventListener('pointerdown', e => { id = e.pointerId; pad0.setPointerCapture(id); move(e); e.preventDefault(); });
+  pad0.addEventListener('pointermove', e => { if (e.pointerId === id) move(e); });
+  pad0.addEventListener('pointerup', end); pad0.addEventListener('pointercancel', end);
+}
 
 /*LOCAL-BEGIN*/
 // ---------- GLB export: every view of the current map as textured meshes in turntable space ----------
@@ -891,6 +1311,8 @@ catch (err) {
   canvas.hidden = true; flat = document.createElement('img'); flat.className = 'flat'; flat.alt = '当前地图'; stage.prepend(flat);
   $('hudStat').textContent = '这个浏览器不支持 WebGL2，只能显示原图';
 }
+if (!W.float) { $('view-walk').disabled = true; $('view-orbit').checked = true; }
+setView(W.float && $('view-walk').checked ? 'walk' : 'orbit');
 const start = fromHash();
 select(start >= 0 ? start : 0, false);
 // test hook: ?sheet=0,45,90 draws the picked map from those camera angles into one contact sheet
@@ -909,7 +1331,24 @@ if (sheet && gl) {
     document.body.textContent = ''; document.body.style.padding = '0'; c.style.cssText = 'display:block;width:100%'; document.body.appendChild(c); document.title = 'sheet-ready';
   }, 100);
 }
-window.__map3d = { st, select, draw, resize };   // handle for tests
+// test hook: ?shots=1 draws the fused world of the picked map from a set of cameras into one contact sheet
+if (new URLSearchParams(location.search).get('shots') && gl && W.float) {
+  const wait = setInterval(() => {
+    const m = st.map; if (!m || !m.complete) return;
+    clearInterval(wait); st.paused = true; st.mode = +new URLSearchParams(location.search).get('mode') || 0;
+    const cw = 480, ch = 280, c = document.createElement('canvas'); canvas.width = cw * 2; canvas.height = ch * 2; W.mapId = ''; buildWorld(m);
+    let list = [['原图视角', 'over', 0, 0], ['第三人称 南', 'third', 0, 0.5], ['第三人称 东', 'third', 90, 0.5], ['第三人称 北', 'third', 180, 0.5], ['第三人称 西', 'third', 270, 0.5], ['第一人称 北', 'first', 0, 0.06], ['第一人称 东', 'first', -90, 0.06], ['第一人称 南', 'first', 180, 0.06]];
+    if (new URLSearchParams(location.search).get('shots') === '4') list = [list[0], list[1], list[3], list[5]];      // the short set: one row
+    c.width = 4 * cw; c.height = Math.ceil(list.length / 4) * ch; const cx = c.getContext('2d'); cx.font = '15px Menlo, monospace';
+    list.forEach(([name, cam, deg, pitch], k) => {
+      setCam(cam); if (cam !== 'over') { W.yaw = deg * RAD; W.pitch = pitch; } W.cd = W.dist; W.tgt = cam === 'over' ? [0, 0, 0] : [W.px, W.py + 0.11, W.pz]; W.lift = liftNeeded();
+      drawWorld(camOfWalk()); const x = (k % 4) * cw, y = Math.floor(k / 4) * ch;
+      cx.drawImage(canvas, x, y, cw, ch); cx.fillStyle = 'rgba(0,0,0,.6)'; cx.fillRect(x, y, 170, 22); cx.fillStyle = '#fff'; cx.fillText(m.id + ' ' + name, x + 6, y + 16);
+    });
+    document.body.textContent = ''; document.body.style.padding = '0'; c.style.cssText = 'display:block;width:100%'; document.body.appendChild(c); document.title = 'shots-ready';
+  }, 100);
+}
+window.__map3d = { st, select, draw, resize, W };   // handle for tests
 })();
 </script>
 </body>
